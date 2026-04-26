@@ -1,7 +1,7 @@
 # 模板语法转化 Skill - Template Conversion
 
 ## 功能描述
-将 Vue2 模板语法转化为 Vue3 兼容的模板语法。处理插槽语法升级、指令转化、过渡类名更新等模板层面的迁移工作。
+将 Vue2 模板语法转化为 Vue3 兼容的模板语法。处理插槽语法升级、指令转化、过渡类名更新、**Huadesign 组件库属性转化**等模板层面的迁移工作。
 
 ## 触发条件
 当迁移专家处理 `.vue` 文件中的 `<template>` 部分时调用。
@@ -236,3 +236,70 @@ Vue3 支持 **Fragment**（多根节点），可移除不必要的包裹 div：
 ```
 
  **注意**：对于使用了 `v-for`、`v-if`/`v-else` 或 CSS 选择器依赖父容器的情况，仍需保留包裹元素。
+
+---
+
+## 9. Huadesign 组件识别与属性转化
+
+### 9.1 组件识别规则
+
+在处理 `<template>` 模板时，遇到以下形式的组件标签，**识别为 Huadesign 组件库的组件**，需要参考 `huadesignVue转化规则.md` 进行属性转化：
+
+| 组件前缀 | 示例 | 说明 |
+|---------|------|------|
+| `a-` | `<a-modal>`, `<a-tooltip>`, `<a-button>`, `<a-table>`, `<a-form>`, `<a-input>`, `<a-select>`, `<a-drawer>`, `<a-popconfirm>`, `<a-dropdown>`, `<a-menu>`, `<a-tree>`, `<a-tabs>` 等 | Huadesign 组件库前缀 |
+
+**识别算法**：
+1. 遍历 `<template>` 中的所有非原生 HTML 标签
+2. 匹配标签名是否以 `a-` 开头（区分大小写，应为小写 `a-`）
+3. 符合条件则标记为 Huadesign 组件，立即暂停通用模板转化，转到 `huadesignVue转化规则.md` 查找该组件的迁移规则
+
+### 9.2 转化流程
+
+当识别到 Huadesign 组件后，执行以下流程：
+
+```
+[识别 a- 前缀组件]
+  → 暂停通用模板转化（如 .sync → v-model）
+  → 查阅 huadesignVue转化规则.md 中对应组件的规则
+  → 按规则文档逐条转化该组件的属性和事件
+  → 其他非 Huadesign 的通用语法仍按本 Skill 通用规则处理
+  → 记录组件转化明细到迁移日志
+```
+
+**关键原则**：
+1. **规则文档优先级高于通用规则**：对于 `huadesignVue转化规则.md` 中明确列出的属性或事件，严格按照规则文档执行
+2. **未覆盖的属性回退通用规则**：对于规则文档中未明确列出的属性，降级使用本 Skill 的通用规则（如 `.sync` → `v-model:prop`）
+3. **整组件处理**：遇到 `a-` 组件时，将该组件标签上的**所有属性和事件**作为一个整体进行处理，优先按规则文档转化，规则文档未覆盖的部分再用通用规则补充
+
+### 9.3 属性分析示例
+
+假设 `huadesignVue转化规则.md` 中对 `a-modal` 组件定义如下规则（示例）：
+
+| 属性/事件 | Vue2 用法 | Vue3 用法 |
+|-----------|----------|-----------|
+| `visible` | `:visible.sync="val"` | `v-model:visible="val"` |
+| `title` | `:title="str"` | `title="str"` 或 `:title="str"`（不变） |
+| `@ok` | `@ok="fn"` | `@ok="fn"`（不变） |
+| `@cancel` | `@cancel="fn"` | `@cancel="fn"`（不变） |
+
+实际转化时，**必须**根据 `huadesignVue转化规则.md` 的实际内容执行转化，以上仅作格式示意。
+
+### 9.4 日志记录
+
+对每个经过 Huadesign 规则处理的 a- 组件，在迁移日志中记录：
+
+```json
+{
+  "type": "HUADESIGN_COMPONENT",
+  "component": "a-modal",
+  "rules_source": "huadesignVue转化规则.md",
+  "transformations": [
+    {
+      "attribute": ":visible.sync",
+      "from": ":visible.sync=\"dialogVisible\"",
+      "to": "v-model:visible=\"dialogVisible\"",
+      "rule_ref": "huadesignVue转化规则.md §a-modal.visible"
+    }
+  ]
+}
