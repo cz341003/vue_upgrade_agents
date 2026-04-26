@@ -243,7 +243,7 @@ Vue3 支持 **Fragment**（多根节点），可移除不必要的包裹 div：
 
 ### 9.1 组件识别规则
 
-在处理 `<template>` 模板时，遇到以下形式的组件标签，**识别为 Huadesign 组件库的组件**，需要参考 `huadesignVue转化规则.md` 进行属性转化：
+在处理 `<template>` 模板时，遇到以下形式的组件标签，**识别为 Huadesign 组件库的组件**，需要优先参考 `huadesignVue转化规则.md` 进行属性转化：
 
 | 组件前缀 | 示例 | 说明 |
 |---------|------|------|
@@ -301,5 +301,123 @@ Vue3 支持 **Fragment**（多根节点），可移除不必要的包裹 div：
       "to": "v-model:visible=\"dialogVisible\"",
       "rule_ref": "huadesignVue转化规则.md §a-modal.visible"
     }
+   ]
+}
+
+---
+
+## 10. 子模块公共组件处理规则
+
+### 10.1 背景
+
+Git submodule 目录（如 `src/components/`）中的公共组件**不参与本项目的迁移**。但业务文件的 `<template>` 中仍会引用这些来自子模块的自定义公共组件，模板转化时需要正确处理它们。
+
+### 10.2 组件识别规则
+
+本 Skill 从调用参数中接收 `submodule_components` 映射表（由迁移专家在 4.0 前置阶段建立），格式如下：
+
+```json
+{
+  "submodule_components": {
+    "DeleteConfirm": { "path": "src/components/deleteConfirm.vue", "tag": "delete-confirm" },
+    "PageHeader": { "path": "src/components/pageHeader.vue", "tag": "page-header" },
+    "SearchForm": { "path": "src/components/searchForm.vue", "tag": "search-form" }
+  }
+}
+```
+
+**识别算法**：
+1. 遍历 `<template>` 中的所有非原生 HTML 标签
+2. 将每个标签名（kebab-case 格式）与 `submodule_components` 中的每个 `tag` 字段匹配
+3. 匹配成功 → 识别为**子模块公共组件**，按 10.3 节规则处理
+4. 匹配失败 → 按普通组件（Huadesign 或其他）继续处理
+
+### 10.3 转化规则
+
+对于识别为子模块公共组件的标签，执行以下规则：
+
+#### 10.3.1 默认规则：保持属性原样（禁止自动转化）
+
+**核心原则：默认不对子模块公共组件的任何属性和事件做转化。**
+
+- `.sync` 修饰符：**禁止**转化为 `v-model:prop`，保持 `:prop.sync="value"` 的写法不变
+- `v-model`：**禁止**转化为 Vue3 的 `modelValue`/`update:modelValue`，保持原样
+- `.native` 修饰符：**保留**，不允许移除
+- 所有属性和事件：保持 Vue2 原始写法，不做任何语法升级
+
+**原因**：
+- 子模块公共组件本身不参与迁移，它们在 Vue3 环境中仍保持 Vue2 的接口规范
+- 如果将 `.sync` 转化为 `v-model:prop`，会导致子模块组件接收不到正确的属性/事件而功能异常
+- 保持原样确保与子模块的兼容性
+
+#### 10.3.2 例外规则：差异文档覆盖
+
+当本 Skill 同时接收到来自迁移专家的 `公共组件库差异文档.md` 中对应组件的规则片段时，按以下优先级判断：
+
+1. **差异文档有明确规则** → 按差异文档的规则转化
+2. **差异文档未覆盖的属性** → 保持原样（按 10.3.1 默认规则处理）
+
+差异文档传入格式示例：
+
+```json
+{
+  "diff_rules": {
+    "delete-confirm": {
+      "transformations": [
+        { "from": ":visible.sync", "to": "v-model:visible" }
+      ]
+    }
+  }
+}
+```
+
+只有当差异文档明确说明某组件的某属性需要从 A→B 转化时，才对该属性执行转化。
+
+#### 10.3.3 判断逻辑流程图
+
+```
+[识别到子模块公共组件标签]
+  → 检查是否有该组件的 diff_rules
+  ├── 有差异规则 → 按规则文档转化对应属性，未覆盖属性保持原样
+  └── 无差异规则 → 所有属性保持原样（不做任何转化）
+```
+
+### 10.4 与 Huadesign 组件的区别
+
+| 维度 | Huadesign 组件 | 子模块公共组件 |
+|------|---------------|--------------|
+| 识别方式 | 标签名前缀 `a-` | 匹配 `submodule_components` 映射表 |
+| 转化策略 | 按规则文档执行转化，未覆盖回退通用规则 | 默认保持原样，仅差异文档明确规则时才转化 |
+| 规则来源 | `huadesignVue转化规则.md` | `公共组件库差异文档.md` |
+| 处理优先级 | Huadesign 优先于通用规则 | 差异文档优先，通用规则不适用 |
+
+### 10.5 日志记录
+
+对每个识别到的子模块公共组件，在迁移日志中记录：
+
+```json
+{
+  "type": "SUBMODULE_COMPONENT",
+  "component": "delete-confirm",
+  "source": "src/components/deleteConfirm.vue",
+  "action": "KEEP_AS_IS",
+  "reason": "子模块公共组件，不参与迁移，保持属性原样",
+  "diff_rules_applied": false
+}
+```
+
+当有差异规则被应用时：
+
+```json
+{
+  "type": "SUBMODULE_COMPONENT",
+  "component": "delete-confirm",
+  "source": "src/components/deleteConfirm.vue",
+  "action": "PARTIAL_TRANSFORM",
+  "reason": "公共组件库差异文档有覆盖规则",
+  "diff_rules_applied": true,
+  "transformations": [
+    { "attribute": ":visible.sync", "from": ":visible.sync=\"val\"", "to": "v-model:visible=\"val\"" }
   ]
 }
+```
