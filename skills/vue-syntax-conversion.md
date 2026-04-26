@@ -101,6 +101,180 @@ MyComponent.props = ['message']
 
 使用 `defineAsyncComponent` 包裹动态导入。
 
+### 1.6 Vue.extend 组件定义转化
+
+```javascript
+// Vue2 - Vue.extend 定义组件（常见于 .js / .mjs 文件）
+import Vue from 'vue'
+const MyButton = Vue.extend({
+  name: 'MyButton',
+  props: { type: String, disabled: Boolean },
+  data() {
+    return { count: 0 }
+  },
+  methods: {
+    handleClick() { this.$emit('click') }
+  },
+  template: '<button :class="type" @click="handleClick"><slot/></button>'
+})
+
+// 用法：作为组件注册或通过 Vue.use 安装
+export default MyButton
+```
+
+```vue
+<!-- Vue3 - 转化为 defineComponent / <script setup> -->
+
+<!-- 方式一：Options API（保持非 .vue 文件的注册用途） -->
+<script lang="ts">
+import { defineComponent, PropType } from 'vue'
+interface Props { type?: string; disabled?: boolean }
+export default defineComponent({
+  name: 'MyButton',
+  props: { type: String, disabled: Boolean },
+  data() { return { count: 0 } },
+  methods: { handleClick() { this.$emit('click') } }
+})
+</script>
+
+<!-- 方式二：Composition API（推荐，.vue 文件） -->
+<script setup lang="ts">
+defineOptions({ name: 'MyButton' })
+const props = defineProps<{ type?: string; disabled?: boolean }>()
+const count = ref(0)
+const emit = defineEmits<{ (e: 'click'): void }>()
+function handleClick() { emit('click') }
+</script>
+```
+
+```javascript
+// Vue3 - 纯 JS 文件中的组件定义（用于注册到 app）
+import { defineComponent, h } from 'vue'
+const MyButton = defineComponent({
+  name: 'MyButton',
+  props: { type: String, disabled: Boolean },
+  setup(props, { emit, slots }) {
+    const count = ref(0)
+    function handleClick() { emit('click') }
+    return () => h('button', { class: props.type, onClick: handleClick }, slots.default?.())
+  }
+})
+export default MyButton
+```
+
+**关键变化说明：**
+- `Vue.extend({...})` → `defineComponent({...})`（3.x 中等价替换，类型推导更完善）
+- 如果原组件使用了 `template` 属性，需要改为 `render` 函数或转为 `.vue` 文件
+- 如果原组件是通过 `Vue.use(ComponentExtend)` 安装的，见 §2.1 中的 `Vue.extend + Vue.use 组合` 处理
+
+### 1.7 非 .vue 组件文件（.js / .mjs）处理
+
+迁移工程中除了 `.vue` 文件，还存在大量 `.js` / `.mjs` 文件中声明组件、导出供其他组件注册使用的场景。以下是典型模式及迁移方式：
+
+#### 1.7.1 Render 函数导出组件
+
+```javascript
+// Vue2 - .mjs / .js 文件中通过 render 导出组件
+import { h } from 'vue'
+export default {
+  name: 'MyRenderComp',
+  props: { message: String },
+  render(h) { return h('div', { class: 'msg' }, this.message) }
+}
+```
+
+```vue
+<!-- Vue3 - 转化为 .vue 文件 -->
+<script setup lang="ts">
+defineProps<{ message: string }>()
+</script>
+<template>
+  <div class="msg">{{ message }}</div>
+</template>
+```
+
+或保持 JS 形式：
+```javascript
+// Vue3 - 保持 JS 形式（用于动态注册场景）
+import { defineComponent, h } from 'vue'
+const MyRenderComp = defineComponent({
+  name: 'MyRenderComp',
+  props: { message: String },
+  setup(props, { slots }) {
+    return () => h('div', { class: 'msg' }, props.message)
+  }
+})
+export default MyRenderComp
+```
+
+#### 1.7.2 工厂函数/高阶组件导出
+
+```javascript
+// Vue2 - 工厂函数导出组件
+export function createTable(options) {
+  return Vue.extend({ 
+    props: { data: Array },
+    template: '<table>...</table>',
+    methods: { /* 使用 options */ }
+  })
+}
+```
+
+```javascript
+// Vue3 - 工厂函数导出
+import { defineComponent, h } from 'vue'
+export function createTable(options) {
+  return defineComponent({
+    props: { data: Array },
+    setup(props) {
+      // 使用 options
+      return () => h('table', /* ... */)
+    }
+  })
+}
+```
+
+#### 1.7.3 纯 JS 配置对象组件（无 Vue.extend 包装）
+
+```javascript
+// Vue2 - 直接导出配置对象
+export default {
+  name: 'PlainComponent',
+  props: ['value'],
+  template: '<div>{{ value }}</div>'
+}
+```
+
+```javascript
+// Vue3 - 用 defineComponent 包装（获得类型推导）
+import { defineComponent } from 'vue'
+export default defineComponent({
+  name: 'PlainComponent',
+  props: ['value'],
+  template: '<div>{{ value }}</div>'
+})
+```
+
+#### 1.7.4 VNode 节点导出（非组件）
+
+```javascript
+// Vue2 - 导出 VNode 供其他组件渲染
+export function renderHeader(h) {
+  return h('div', { class: 'header' }, 'Title')
+}
+// 其他组件中：<component :is="renderHeader" />
+```
+
+```vue
+<!-- Vue3 - 导出为函数式组件 -->
+<script setup lang="ts">
+const renderHeader = () => h('div', { class: 'header' }, 'Title')
+</script>
+<template>
+  <renderHeader />
+</template>
+```
+
 ---
 
 ## 2. 全局 API 迁移
@@ -116,6 +290,54 @@ MyComponent.props = ['message']
 | `Vue.mixin(mixin)` | `app.mixin(mixin)` |
 | `Vue.use(plugin)` | `app.use(plugin)` |
 | `Vue.filter('name', fn)` | `app.config.globalProperties.$filters = { name: fn }` |
+
+**Vue.extend + Vue.use 组合特殊处理：**
+
+Vue2 中常出现 `Vue.extend` 定义组件后通过 `Vue.use` 安装的模式：
+
+```javascript
+// Vue2 - Vue.extend + Vue.use 组合
+// utils/my-plugin.js
+import Vue from 'vue'
+const MyComponent = Vue.extend({
+  name: 'MyComponent',
+  template: '<div>{{ message }}</div>',
+  props: { message: String }
+})
+MyComponent.install = function(Vue) {
+  Vue.component('MyComponent', MyComponent)
+}
+export default MyComponent
+
+// main.js
+import MyComponent from './utils/my-plugin'
+Vue.use(MyComponent)
+```
+
+```javascript
+// Vue3 - 拆分为组件定义 + app.component 注册
+// utils/my-component.js
+import { defineComponent } from 'vue'
+const MyComponent = defineComponent({
+  name: 'MyComponent',
+  props: { message: String },
+  template: '<div>{{ message }}</div>'
+})
+export default MyComponent
+
+// main.js
+import { createApp } from 'vue'
+import MyComponent from './utils/my-component'
+const app = createApp(App)
+app.component('MyComponent', MyComponent)  // 替代 Vue.use(MyComponent)
+app.mount('#app')
+```
+
+**处理规则：**
+1. 识别 `.js`/`.mjs` 文件中 `Vue.extend({...})` + `Component.install` 或 `Vue.use(ComponentExtend)` 的模式
+2. 移除 `install` 方法（Vue3 中不需要）
+3. `Vue.use(ComponentExtend)` → `app.component('Name', Component)`（如果目标是注册为全局组件）
+4. 如果 `Vue.extend` 的对象本身只是一个普通组件（无 `install` 方法），直接 `Vue.extend` → `defineComponent`
 
 ### 2.2 全局属性类型声明
 
@@ -375,3 +597,8 @@ const store = useStore() // 需要状态管理专家实现
 const userInfo = computed(() => store.state.user.info)
 function login() { store.dispatch('user/login', payload) }
 </script>
+```
+
+## 10. 注意事项
+
+- 转化过程中，如果未匹配到上述转化规则，查阅vue3官方文档查找解决方案，不要自己猜；
