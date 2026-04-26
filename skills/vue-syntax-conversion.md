@@ -558,6 +558,138 @@ async function fetchData(): Promise<void> { /* ... */ }
 
 ---
 
+### 7.3 纯 JS 工具文件 → TS 转化（非组件文件）
+
+对于 `src/utils/*.js`、`src/api/*.js` 等不包含 Vue 组件定义、仅导出普通函数/常量的纯 JS 工具文件，需要将其转化为 TypeScript 文件（`.js` → `.ts`）并添加类型标注。
+
+#### 7.3.1 工具函数文件（src/utils/*.js）
+
+```javascript
+// Vue2 - JS 工具函数
+import moment from 'moment'
+export function formatDate(date, format = 'YYYY-MM-DD') {
+  return moment(date).format(format)
+}
+export function debounce(fn, delay) {
+  let timer = null
+  return function(...args) {
+    clearTimeout(timer)
+    timer = setTimeout(() => fn.apply(this, args), delay)
+  }
+}
+export const API_BASE_URL = '/api/v1'
+```
+
+```typescript
+// Vue3 - TS 工具函数
+import moment from 'moment'
+export function formatDate(date: string | Date, format: string = 'YYYY-MM-DD'): string {
+  return moment(date).format(format)
+}
+export function debounce<T extends (...args: any[]) => any>(
+  fn: T,
+  delay: number
+): (...args: Parameters<T>) => void {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  return function(this: any, ...args: Parameters<T>): void {
+    if (timer) clearTimeout(timer)
+    timer = setTimeout(() => fn.apply(this, args), delay)
+  }
+}
+export const API_BASE_URL: string = '/api/v1'
+```
+
+#### 7.3.2 API 接口文件（src/api/*.js）
+
+```javascript
+// Vue2 - JS API 文件
+import request from '@/utils/request'
+export function getUsers(params) {
+  return request({ url: '/users', method: 'get', params })
+}
+export function createUser(data) {
+  return request({ url: '/users', method: 'post', data })
+}
+export function deleteUser(id) {
+  return request({ url: `/users/${id}`, method: 'delete' })
+}
+```
+
+```typescript
+// Vue3 - TS API 文件
+import request from '@/utils/request'
+
+// 定义请求/响应类型
+export interface UserQuery {
+  page?: number
+  pageSize?: number
+  keyword?: string
+  status?: string | number
+}
+export interface UserInfo {
+  id: number
+  name: string
+  email: string
+  role: string
+  createdAt: string
+}
+export interface PaginatedResponse<T> {
+  code: number
+  data: { list: T[]; total: number }
+  message: string
+}
+
+export function getUsers(params: UserQuery): Promise<PaginatedResponse<UserInfo>> {
+  return request({ url: '/users', method: 'get', params })
+}
+export function createUser(data: Partial<UserInfo>): Promise<{ code: number; data: UserInfo; message: string }> {
+  return request({ url: '/users', method: 'post', data })
+}
+export function deleteUser(id: number): Promise<{ code: number; message: string }> {
+  return request({ url: `/users/${id}`, method: 'delete' })
+}
+```
+
+#### 7.3.3 转化规则
+
+| 原始 JS 模式 | 目标 TS 模式 | 说明 |
+|-------------|-------------|------|
+| `function fn(a, b)` | `function fn(a: type, b: type): ReturnType` | 为所有参数和返回值添加类型 |
+| `const CONST = value` | `const CONST: type = value` | 为常量添加类型标注 |
+| 未使用泛型 | 使用泛型约束 | 如 `debounce<T>(fn, delay)` |
+| `any` 类型参数 | 尽可能推断精确类型 | 如 `params: UserQuery` 而非 `params: any` |
+| 无接口定义 | 定义 Request/Response 接口 | 如 `UserQuery`、`UserInfo`、`PaginatedResponse<T>` |
+| 无类型导出 | 导出接口供组件使用 | 其他文件可 `import type { UserInfo } from '@/api/user'` |
+| `config.js` | `config.ts` | 配置文件也转为 TS，使用 `const` + `as const` |
+| `router.js` | `router.ts` | 路由文件转为 TS，使用 `RouteRecordRaw` 类型 |
+
+#### 7.3.4 文件扩展名变更
+
+所有纯 JS 工具文件在迁移后需按以下规则变更文件扩展名：
+
+| 原始路径 | 迁移后路径 | 说明 |
+|---------|-----------|------|
+| `src/utils/format.js` | `src/utils/format.ts` | 工具函数 |
+| `src/utils/request.js` | `src/utils/request.ts` | 网络请求封装 |
+| `src/utils/validate.js` | `src/utils/validate.ts` | 校验函数 |
+| `src/utils/index.js` | `src/utils/index.ts` | 工具函数入口 |
+| `src/api/user.js` | `src/api/user.ts` | API 接口 |
+| `src/api/role.js` | `src/api/role.ts` | API 接口 |
+| `src/config/index.js` | `src/config/index.ts` | 配置文件 |
+| `src/router/index.js` | `src/router/index.ts` | 路由配置 |
+| `src/store/*.js` | `src/store/*.ts` | 状态管理文件 |
+| `src/plugins/*.js` | `src/plugins/*.ts` | 插件文件 |
+
+#### 7.3.5 注意事项
+
+1. **`import` 路径更新**：其他文件 `import` 这些工具文件时，需同步更新路径中的 `.js` → `.ts`（或直接去掉扩展名）
+2. **`.mjs` 文件处理**：`.mjs` 文件同样转为 `.ts`，注意 ESM 模块语法保持（`import`/`export` 保留）
+3. **默认导出**：JS 文件中的 `module.exports = { ... }` 转为 `export default { ... }` 或具名导出
+4. **`require` 替换**：`const xxx = require('xxx')` 转为 `import xxx from 'xxx'`
+5. **全局变量**：如果使用 `window.xxx` 全局变量，需在 `.d.ts` 文件中声明类型
+6. **工具函数保留纯函数性**：不改变函数逻辑，仅添加类型信息
+7. **`ts-ignore` 使用**：对于无法确定类型的第三方库调用，可使用 `// @ts-ignore` 暂时绕过，但需同时添加 `// TODO: 补充类型定义` 注释
+
 ## 8. 自定义指令钩子转化
 
 | Vue2 | Vue3 | 说明 |

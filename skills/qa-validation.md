@@ -26,7 +26,27 @@
 }
 ```
 
-### 1.2 package.json 依赖检查规则
+### 1.2 JS→TS 文件扩展名检查规则
+
+迁移后，原 Vue2 项目中的纯 JS 工具文件应转为 TypeScript 文件。质量检查时应验证以下文件的扩展名是否已变更：
+
+| 原始路径 | 应转换路径 | 检查要点 |
+|---------|-----------|---------|
+| `src/utils/*.js` | `src/utils/*.ts` | 工具函数必须添加类型标注 |
+| `src/api/*.js` | `src/api/*.ts` | API 接口必须定义请求/响应类型接口 |
+| `src/config/*.js` | `src/config/*.ts` | 配置文件使用 `as const` |
+| `src/router/*.js` | `src/router/index.ts` | 路由使用 `RouteRecordRaw` |
+| `src/store/*.js` | `src/store/*.ts` 或 `src/stores/*.ts` | 状态管理文件（Pinia） |
+
+检查命令：
+```bash
+# 检查是否还有旧的 .js 工具文件残留（排除 node_modules 和 Vue 组件）
+find src -name "*.js" -not -path "*/node_modules/*" | grep -E "src/(utils|api|config|router|store)/"
+```
+
+**验证标准：** 以上目录中不应存在任何 `.js` 后缀文件，所有文件均应转换为 `.ts` 后缀且包含有效的类型标注。
+
+### 1.3 package.json 依赖检查规则
 
 ```json
 {
